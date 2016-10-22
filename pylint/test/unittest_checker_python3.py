@@ -1,3 +1,6 @@
+# Copyright (c) 2014-2015 Brett Cannon <brett@python.org>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -211,6 +214,46 @@ class Python3CheckerTest(testutils.CheckerTestCase):
 
     def test_cmp_method(self):
         self.defined_method_test('cmp', 'cmp-method')
+
+    def test_div_method(self):
+        self.defined_method_test('div', 'div-method')
+
+    def test_idiv_method(self):
+        self.defined_method_test('idiv', 'idiv-method')
+
+    def test_rdiv_method(self):
+        self.defined_method_test('rdiv', 'rdiv-method')
+
+    def test_eq_and_hash_method(self):
+        """Helper for verifying that a certain method is not defined."""
+        node = astroid.extract_node("""
+            class Foo(object):  #@
+                def __eq__(self, other):
+                    pass
+                def __hash__(self):
+                    pass""")
+        with self.assertNoMessages():
+            self.checker.visit_classdef(node)
+
+    def test_eq_and_hash_is_none(self):
+        """Helper for verifying that a certain method is not defined."""
+        node = astroid.extract_node("""
+            class Foo(object):  #@
+                def __eq__(self, other):
+                    pass
+                __hash__ = None""")
+        with self.assertNoMessages():
+            self.checker.visit_classdef(node)
+
+    def test_eq_without_hash_method(self):
+        """Helper for verifying that a certain method is not defined."""
+        node = astroid.extract_node("""
+            class Foo(object):  #@
+                def __eq__(self, other):
+                    pass""")
+        message = testutils.Message('eq-without-hash', node=node)
+        with self.assertAddsMessages(message):
+            self.checker.visit_classdef(node)
 
     @python2_only
     def test_print_statement(self):

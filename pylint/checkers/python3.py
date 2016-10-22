@@ -1,3 +1,6 @@
+# Copyright (c) 2014-2015 Brett Cannon <brett@python.org>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Pavel Roskin <proski@gnu.org>
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -330,6 +333,30 @@ class Python3Checker(checkers.BaseChecker):
                   'Python 3. Using either `key` or `functools.cmp_to_key` '
                   'should be preferred.',
                   {'maxversion': (3, 0)}),
+        'W1641': ('Implementing __eq__ without also implementing __hash__',
+                  'eq-without-hash',
+                  'Used when a class implements __eq__ but not __hash__.  In Python 2, objects '
+                  'get object.__hash__ as the default implementation, in Python 3 objects get '
+                  'None as their default __hash__ implementation if they also implement __eq__.',
+                  {'maxversion': (3, 0)}),
+        'W1642': ('__div__ method defined',
+                  'div-method',
+                  'Used when a __div__ method is defined.  Using `__truediv__` and setting'
+                  '__div__ = __truediv__ should be preferred.'
+                  '(method is not used by Python 3)',
+                  {'maxversion': (3, 0)}),
+        'W1643': ('__idiv__ method defined',
+                  'idiv-method',
+                  'Used when a __idiv__ method is defined.  Using `__itruediv__` and setting'
+                  '__idiv__ = __itruediv__ should be preferred.'
+                  '(method is not used by Python 3)',
+                  {'maxversion': (3, 0)}),
+        'W1644': ('__rdiv__ method defined',
+                  'rdiv-method',
+                  'Used when a __rdiv__ method is defined.  Using `__rtruediv__` and setting'
+                  '__rdiv__ = __rtruediv__ should be preferred.'
+                  '(method is not used by Python 3)',
+                  {'maxversion': (3, 0)}),
     }
 
     _bad_builtins = frozenset([
@@ -362,6 +389,9 @@ class Python3Checker(checkers.BaseChecker):
         '__hex__',
         '__nonzero__',
         '__cmp__',
+        '__div__',
+        '__idiv__',
+        '__rdiv__',
     ])
 
     def __init__(self, *args, **kwargs):
@@ -423,6 +453,9 @@ class Python3Checker(checkers.BaseChecker):
     def visit_classdef(self, node):
         if '__metaclass__' in node.locals:
             self.add_message('metaclass-assignment', node=node)
+        locals_and_methods = set(node.locals).union(x.name for x in node.mymethods())
+        if '__eq__' in locals_and_methods and '__hash__' not in locals_and_methods:
+            self.add_message('eq-without-hash', node=node)
 
     @utils.check_messages('old-division')
     def visit_binop(self, node):

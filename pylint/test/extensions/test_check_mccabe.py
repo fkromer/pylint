@@ -1,3 +1,6 @@
+# Copyright (c) 2016 Moises Lopez - https://www.vauxoo.com/ <moylop260@vauxoo.com>
+# Copyright (c) 2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -8,7 +11,7 @@ import os.path as osp
 import unittest
 
 from pylint import checkers
-from pylint.extensions.check_mccabe import register
+from pylint.extensions.mccabe import register
 from pylint.lint import PyLinter
 from pylint.reporters import BaseReporter
 

@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2006-2016 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2012, 2014 Google, Inc.
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Dmitry Pribysh <dmand@yandex.ru>
+# Copyright (c) 2016 Moises Lopez - https://www.vauxoo.com/ <moylop260@vauxoo.com>
+# Copyright (c) 2016 Łukasz Rogalski <rogalski.91@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -5,8 +13,9 @@
 """
 from __future__ import generators
 
-import sys
+import collections
 from collections import defaultdict
+import sys
 
 import six
 
@@ -24,7 +33,7 @@ from pylint.checkers.utils import (
     decorated_with_property, unimplemented_abstract_methods,
     decorated_with, class_is_abstract,
     safe_infer, has_known_bases, is_iterable, is_comprehension)
-from pylint.utils import deprecated_option, get_global_option
+from pylint.utils import get_global_option
 
 
 if sys.version_info >= (3, 0):
@@ -34,11 +43,147 @@ else:
 INVALID_BASE_CLASSES = {'bool', 'range', 'slice', 'memoryview'}
 
 
-def _get_method_args(method):
-    args = method.args.args
+# Dealing with useless override detection, with regard
+# to parameters vs arguments
+
+_CallSignature = collections.namedtuple(
+    '_CallSignature', 'args kws starred_args starred_kws')
+_ParameterSignature = collections.namedtuple(
+    '_ParameterSignature',
+    'args kwonlyargs varargs kwargs',
+)
+
+
+def _signature_from_call(call):
+    kws = {}
+    args = []
+    starred_kws = []
+    starred_args = []
+    for keyword in call.keywords or []:
+        arg, value = keyword.arg, keyword.value
+        if arg is None and isinstance(value, astroid.Name):
+            # Starred node and we are interested only in names,
+            # otherwise some transformation might occur for the parameter.
+            starred_kws.append(value.name)
+        elif isinstance(value, astroid.Name):
+            kws[arg] = value.name
+        else:
+            kws[arg] = None
+
+    for arg in call.args:
+        if isinstance(arg, astroid.Starred) and isinstance(arg.value, astroid.Name):
+            # Positional variadic and a name, otherwise some transformation
+            # might have occurred.
+            starred_args.append(arg.value.name)
+        elif isinstance(arg, astroid.Name):
+            args.append(arg.name)
+        else:
+            args.append(None)
+
+    return _CallSignature(args, kws, starred_args, starred_kws)
+
+
+def _signature_from_arguments(arguments):
+    kwarg = arguments.kwarg
+    vararg = arguments.vararg
+    args = [arg.name for arg in arguments.args if arg.name != 'self']
+    kwonlyargs = [arg.name for arg in arguments.kwonlyargs]
+    return _ParameterSignature(args, kwonlyargs, vararg, kwarg)
+
+
+def _definition_equivalent_to_call(definition, call):
+    '''Check if a definition signature is equivalent to a call.'''
+    if definition.kwargs:
+        same_kw_variadics = definition.kwargs in call.starred_kws
+    else:
+        same_kw_variadics = not call.starred_kws
+    if definition.varargs:
+        same_args_variadics = definition.varargs in call.starred_args
+    else:
+        same_args_variadics = not call.starred_args
+    same_kwonlyargs = all(kw in call.kws for kw in definition.kwonlyargs)
+    same_args = definition.args == call.args
+
+    no_additional_kwarg_arguments = True
+    if call.kws:
+        for keyword in call.kws:
+            is_arg = keyword in call.args
+            is_kwonly = keyword in definition.kwonlyargs
+            if not is_arg and not is_kwonly:
+                # Maybe this argument goes into **kwargs,
+                # or it is an extraneous argument.
+                # In any case, the signature is different than
+                # the call site, which stops our search.
+                no_additional_kwarg_arguments = False
+                break
+
+    return all((
+        same_args,
+        same_kwonlyargs,
+        same_args_variadics,
+        same_kw_variadics,
+        no_additional_kwarg_arguments,
+    ))
+
+
+
+# Deal with parameters overridding in two methods.
+
+def _positional_parameters(method):
+    positional = method.args.args
     if method.type in ('classmethod', 'method'):
-        return len(args) - 1
-    return len(args)
+        positional = positional[1:]
+    return positional
+
+
+def _same_parameter(first, second):
+    return first.name == second.name
+
+
+def _has_different_parameters(original, overridden):
+    same_length = len(original) == len(overridden)
+    if same_length:
+        return any(not _same_parameter(first, second)
+                   for first, second in zip(original, overridden))
+    return True
+
+
+def _different_parameters(original, overridden):
+    """Determine if the two methods have different parameters
+
+    They are considered to have different parameters if:
+
+       * they have different positional parameters, including different names
+
+       * one of the methods is having variadics, while the other is not
+
+       * they have different keyword only parameters.
+
+    """
+    original_parameters = _positional_parameters(original)
+    overridden_parameters = _positional_parameters(overridden)
+
+    different_positional = _has_different_parameters(original_parameters,
+                                                     overridden_parameters)
+    different_kwonly = _has_different_parameters(original.args.kwonlyargs,
+                                                 overridden.args.kwonlyargs)
+    if original.name in PYMETHODS:
+        # Ignore the difference for special methods. If the parameter
+        # numbers are different, then that is going to be caught by
+        # unexpected-special-method-signature.
+        # If the names are different, it doesn't matter, since they can't
+        # be used as keyword arguments anyway.
+        different_positional = different_kwonly = False
+
+    # Both or none should have extra variadics, otherwise the method
+    # loses or gains capabilities that are not reflected into the parent method,
+    # leading to potential inconsistencies in the code.
+    different_kwarg = sum(1 for param in (original.args.kwarg, overridden.args.kwarg)
+                          if not param) == 1
+    different_vararg = sum(1 for param in (original.args.vararg, overridden.args.vararg)
+                           if not param) == 1
+
+    return different_positional or different_kwarg or different_vararg or different_kwonly
 
 
 def _is_invalid_base_class(cls):
@@ -241,6 +386,11 @@ MSGS = {
               'non-parent-init-called',
               'Used when an __init__ method is called on a class which is not '
               'in the direct ancestors for the analysed class.'),
+    'W0235': ('Useless super delegation in method %r',
+              'useless-super-delegation',
+              'Used whenever we can detect that an overridden method is useless, '
+              'relying on super() delegation to do the same thing as another method '
+              'from the MRO.'),
     'E0236': ('Invalid object %r in __slots__, must contain '
               'only non empty strings',
               'invalid-slots-object',
@@ -291,13 +441,7 @@ class ClassChecker(BaseChecker):
     msgs = MSGS
     priority = -2
     # configuration options
-    options = (('ignore-iface-methods',
-                # TODO(cpopa): remove this in Pylint 1.6.
-                deprecated_option(opt_type="csv",
-                                  help_msg="This is deprecated, because "
-                                           "it is not used anymore.")
-               ),
-               ('defining-attr-methods',
+    options = (('defining-attr-methods',
                 {'default' : ('__init__', '__new__', 'setUp'),
                  'type' : 'csv',
                  'metavar' : '<method names>',
@@ -446,6 +590,9 @@ a metaclass class method.'}
         # ignore actual functions
         if not node.is_method():
             return
+
+        self._check_useless_super_delegation(node)
+
         klass = node.parent.frame()
         self._meth_could_be_func = True
         # check first argument is self if this is actually a method
@@ -492,6 +639,73 @@ a metaclass class method.'}
             pass
 
     visit_asyncfunctiondef = visit_functiondef
+
+    def _check_useless_super_delegation(self, function):
+        '''Check if the given function node is an useless method override
+
+        We consider it *useless* if it uses the super() builtin, but having
+        nothing additional whatsoever than not implementing the method at all.
+        If the method uses super() to delegate an operation to the rest of the MRO,
+        and if the method called is the same as the current one, the arguments
+        passed to super() are the same as the parameters that were passed to
+        this method, then the method could be removed altogether, by letting
+        other implementation to take precedence.
+        '''
+
+        if not function.is_method():
+            return
+
+        if function.decorators:
+            # With decorators is a change of use
+            return
+
+        body = function.body
+        if len(body) != 1:
+            # Multiple statements, which means this overridden method
+            # could do multiple things we are not aware of.
+            return
+
+        statement = body[0]
+        if not isinstance(statement, (astroid.Expr, astroid.Return)):
+            # Doing something else than what we are interested into.
+            return
+
+        call = statement.value
+        if not isinstance(call, astroid.Call):
+            return
+        if not isinstance(call.func, astroid.Attribute):
+            # Not a super() attribute access.
+            return
+
+        # Should be a super call.
+        try:
+            super_call = next(call.func.expr.infer())
+        except astroid.InferenceError:
+            return
+        else:
+            if not isinstance(super_call, objects.Super):
+                return
+
+        # The name should be the same.
+        if call.func.attrname != function.name:
+            return
+
+        # Should be a super call with the MRO pointer being the current class
+        # and the type being the current instance.
+        current_scope = function.parent.scope()
+        if super_call.mro_pointer != current_scope:
+            return
+        if not isinstance(super_call.type, astroid.Instance):
+            return
+        if super_call.type.name != current_scope.name:
+            return
+
+        # Detect if the parameters are the same as the call's arguments.
+        params = _signature_from_arguments(function.args)
+        args = _signature_from_call(call)
+        if _definition_equivalent_to_call(params, args):
+            self.add_message('useless-super-delegation', node=function,
+                             args=(function.name, ))
 
     def _check_slots(self, node):
         if '__slots__' not in node.locals:
@@ -925,16 +1139,14 @@ a metaclass class method.'}
                              args=(method1, refmethod), node=method1)
             return
 
-        instance = cls.instanciate_class()
+        instance = cls.instantiate_class()
         method1 = function_to_method(method1, instance)
         refmethod = function_to_method(refmethod, instance)
 
         # Don't care about functions with unknown argument (builtins).
         if method1.args.args is None or refmethod.args.args is None:
             return
-        # If we use *args, **kwargs, skip the below checks.
-        if method1.args.vararg or method1.args.kwarg:
-            return
+
         # Ignore private to class methods.
         if is_attr_private(method1.name):
             return
@@ -946,9 +1158,7 @@ a metaclass class method.'}
                         decorator.attrname == 'setter'):
                     return
 
-        method1_args = _get_method_args(method1)
-        refmethod_args = _get_method_args(refmethod)
-        if method1_args != refmethod_args:
+        if _different_parameters(refmethod, method1):
             self.add_message('arguments-differ',
                              args=(class_type, method1.name),
                              node=method1)
@@ -1012,7 +1222,7 @@ class SpecialMethodsChecker(BaseChecker):
             # This can support a variable number of parameters.
             return
         if not len(node.args.args) and not node.args.vararg:
-            # Method has no parameter, will be catched
+            # Method has no parameter, will be caught
             # by no-method-argument.
             return
 
@@ -1083,7 +1293,7 @@ class SpecialMethodsChecker(BaseChecker):
 
     def _check_len(self, node):
         inferred = _safe_infer_call_result(node, node)
-        if inferred is None or inferred is astroid.util.Uninferable:
+        if not inferred:
             return
 
         if not isinstance(inferred, astroid.Const):

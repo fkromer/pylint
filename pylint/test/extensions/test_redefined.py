@@ -1,3 +1,5 @@
+# Copyright (c) 2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -9,7 +11,7 @@ import os.path as osp
 import unittest
 
 from pylint import checkers
-from pylint.extensions.check_reassign import MultipleTypesChecker
+from pylint.extensions.redefined_variable_type import MultipleTypesChecker
 from pylint.lint import PyLinter, fix_import_path
 from pylint.reporters import BaseReporter
 

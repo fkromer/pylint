@@ -1,5 +1,10 @@
-# -*- coding: utf-8; mode: python; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4
+# -*- coding: utf-8;
+# mode: python; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4
 # -*- vim:fenc=utf-8:ft=python:et:sw=4:ts=4:sts=4
+
+# Copyright (c) 2008-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014 Manuel Vázquez Acosta <mva.led@gmail.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
 
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
@@ -40,6 +45,7 @@ from __future__ import print_function
 import os
 import os.path as osp
 import sys
+import shlex
 from subprocess import Popen, PIPE
 
 import six
@@ -102,8 +108,7 @@ def lint(filename, options=None):
     return process.returncode
 
 
-def py_run(command_options='', return_std=False, stdout=None, stderr=None,
-           script='epylint'):
+def py_run(command_options='', return_std=False, stdout=None, stderr=None):
     """Run pylint from python
 
     ``command_options`` is a string containing ``pylint`` command line options;
@@ -131,9 +136,10 @@ def py_run(command_options='', return_std=False, stdout=None, stderr=None,
         >>> (pylint_stdout, pylint_stderr) = py_run( 'module_name.py', True)
     """
     # Create command line to call pylint
-    if os.name == 'nt':
-        script += '.bat'
-    command_line = script + ' ' + command_options
+    epylint_part = [sys.executable, "-c", "from pylint import epylint;epylint.Run()"]
+    options = shlex.split(command_options)
+    cli = epylint_part + options
+
     # Providing standard output and/or error if not set
     if stdout is None:
         if return_std:
@@ -146,7 +152,7 @@ def py_run(command_options='', return_std=False, stdout=None, stderr=None,
         else:
             stderr = sys.stderr
     # Call pylint in a subprocess
-    process = Popen(command_line, shell=True, stdout=stdout, stderr=stderr,
+    process = Popen(cli, shell=False, stdout=stdout, stderr=stderr,
                     env=_get_env(), universal_newlines=True)
     proc_stdout, proc_stderr = process.communicate()
     # Return standard output and error

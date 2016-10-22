@@ -1,14 +1,17 @@
+# Copyright (c) 2016 Luis Escobar <lescobar@vauxoo.com>
+# Copyright (c) 2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
 import linecache
 
-from pylint.checkers.base import BaseChecker
+from pylint import checkers
 from pylint.interfaces import IAstroidChecker, HIGH
 from pylint.checkers.utils import check_messages
 
 
-class DocStringStyleChecker(BaseChecker):
+class DocStringStyleChecker(checkers.BaseChecker):
     """Checks format of docstrings based on PEP 0257"""
 
     __implements__ = IAstroidChecker

@@ -1,3 +1,13 @@
+# Copyright (c) 2006-2015 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2012-2014 Google, Inc.
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Dmitry Pribysh <dmand@yandex.ru>
+# Copyright (c) 2015 Noam Yorav-Raphael <noamraph@gmail.com>
+# Copyright (c) 2015 Cezar <celnazli@bitdefender.com>
+# Copyright (c) 2015 James Morgensen <james.morgensen@gmail.com>
+# Copyright (c) 2016 Moises Lopez - https://www.vauxoo.com/ <moylop260@vauxoo.com>
+# Copyright (c) 2016 Ashley Whetter <ashley@awhetter.co.uk>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -16,7 +26,8 @@ from astroid.modutils import (get_module_part, is_standard_module)
 import isort
 
 from pylint.interfaces import IAstroidChecker
-from pylint.utils import EmptyReport, get_global_option
+from pylint.utils import get_global_option
+from pylint.exceptions import EmptyReportError
 from pylint.checkers import BaseChecker
 from pylint.checkers.utils import (
     check_messages,
@@ -117,7 +128,7 @@ def _repr_tree_defs(data, indent_str=None):
         if not files:
             files = ''
         else:
-            files = '(%s)' % ','.join(files)
+            files = '(%s)' % ','.join(sorted(files))
         if indent_str is None:
             lines.append('%s %s' % (mod, files))
             sub_indent_str = '  '
@@ -141,10 +152,10 @@ def _dependencies_graph(filename, dep_info):
     for modname, dependencies in sorted(six.iteritems(dep_info)):
         done[modname] = 1
         printer.emit_node(modname)
-        for modname in dependencies:
-            if modname not in done:
-                done[modname] = 1
-                printer.emit_node(modname)
+        for depmodname in dependencies:
+            if depmodname not in done:
+                done[depmodname] = 1
+                printer.emit_node(depmodname)
     for depmodname, dependencies in sorted(six.iteritems(dep_info)):
         for modname in dependencies:
             printer.emit_edge(modname, depmodname)
@@ -525,7 +536,7 @@ given file (report RP0402 must not be disabled)'}
         return any(astroid.are_exclusive(import_node, node)
                    for import_node in imports)
 
-    def _check_imports_order(self, node):
+    def _check_imports_order(self, _module_node):
         """Checks imports of module `node` are grouped by category
 
         Imports must follow this order: standard, 3rd party, local
@@ -659,9 +670,12 @@ given file (report RP0402 must not be disabled)'}
         if root is not frame:
             contexts.append((root, None))
 
-        for context, level in contexts:
+        for known_context, known_level in contexts:
             for name, alias in node.names:
-                first = _get_first_import(node, context, name, basename, level, alias)
+                first = _get_first_import(
+                    node, known_context,
+                    name, basename,
+                    known_level, alias)
                 if first is not None:
                     self.add_message('reimported', node=node,
                                      args=(name, first.fromlineno))
@@ -670,7 +684,7 @@ given file (report RP0402 must not be disabled)'}
         """return a verbatim layout for displaying dependencies"""
         dep_info = _make_tree_defs(six.iteritems(self._external_dependencies_info()))
         if not dep_info:
-            raise EmptyReport()
+            raise EmptyReportError()
         tree_str = _repr_tree_defs(dep_info)
         sect.append(VerbatimText(tree_str))
 
@@ -680,7 +694,7 @@ given file (report RP0402 must not be disabled)'}
         if not dep_info or not (self.config.import_graph
                                 or self.config.ext_import_graph
                                 or self.config.int_import_graph):
-            raise EmptyReport()
+            raise EmptyReportError()
         filename = self.config.import_graph
         if filename:
             _make_graph(filename, dep_info, sect, '')

@@ -1,3 +1,12 @@
+# Copyright (c) 2006-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2012-2014 Google, Inc.
+# Copyright (c) 2014 Brett Cannon <brett@python.org>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Aru Sahni <arusahni@gmail.com>
+# Copyright (c) 2015 Florian Bruhin <me@the-compiler.org>
+# Copyright (c) 2016 Ashley Whetter <ashley@awhetter.co.uk>
+# Copyright (c) 2016 Glenn Matthews <glenn@e-dad.net>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -7,6 +16,7 @@ main pylint class
 from __future__ import print_function
 
 import collections
+from inspect import cleandoc
 import os
 from os.path import dirname, basename, splitext, exists, isdir, join, normpath
 import re
@@ -23,13 +33,7 @@ from astroid import modutils
 
 from pylint.interfaces import IRawChecker, ITokenChecker, UNDEFINED, implements
 from pylint.reporters.ureports.nodes import Section
-
-
-class UnknownMessage(Exception):
-    """raised when a unregistered message id is encountered"""
-
-class EmptyReport(Exception):
-    """raised when a report is empty and so should not be displayed"""
+from pylint.exceptions import InvalidMessageError, UnknownMessageError, EmptyReportError
 
 
 MSG_TYPES = {
@@ -154,9 +158,11 @@ class MessageDefinition(object):
     def __init__(self, checker, msgid, msg, descr, symbol, scope,
                  minversion=None, maxversion=None, old_names=None):
         self.checker = checker
-        assert len(msgid) == 5, 'Invalid message id %s' % msgid
-        assert msgid[0] in MSG_TYPES, \
-               'Bad message type %s in %r' % (msgid[0], msgid)
+        if len(msgid) != 5:
+            raise InvalidMessageError('Invalid message id %r' % msgid)
+        if not msgid[0] in MSG_TYPES:
+            raise InvalidMessageError(
+                'Bad message type %s in %r' % (msgid[0], msgid))
         self.msgid = msgid
         self.msg = msg
         self.descr = descr
@@ -213,8 +219,8 @@ class MessagesHandlerMixIn(object):
         self.msg_status = 0
 
     def _checker_messages(self, checker):
-        for checker in self._checkers[checker.lower()]:
-            for msgid in checker.msgs:
+        for known_checker in self._checkers[checker.lower()]:
+            for msgid in known_checker.msgs:
                 yield msgid
 
     def disable(self, msgid, scope='package', line=None, ignore_unknown=False):
@@ -222,8 +228,8 @@ class MessagesHandlerMixIn(object):
         assert scope in ('package', 'module')
         # handle disable=all by disabling all categories
         if msgid == 'all':
-            for msgid in MSG_TYPES:
-                self.disable(msgid, scope, line)
+            for message_id in MSG_TYPES:
+                self.disable(message_id, scope, line)
             return
         # msgid is a category?
         catid = category_id(msgid)
@@ -247,7 +253,7 @@ class MessagesHandlerMixIn(object):
         try:
             # msgid is a symbolic or numeric msgid.
             msg = self.msgs_store.check_message_id(msgid)
-        except UnknownMessage:
+        except UnknownMessageError:
             if ignore_unknown:
                 return
             raise
@@ -263,7 +269,7 @@ class MessagesHandlerMixIn(object):
             msgs[msg.msgid] = False
             # sync configuration object
             self.config.disable = [self._message_symbol(mid)
-                                   for mid, val in six.iteritems(msgs)
+                                   for mid, val in sorted(six.iteritems(msgs))
                                    if not val]
 
     def _message_symbol(self, msgid):
@@ -274,7 +280,7 @@ class MessagesHandlerMixIn(object):
         """
         try:
             return self.msgs_store.check_message_id(msgid).symbol
-        except UnknownMessage:
+        except UnknownMessageError:
             return msgid
 
     def enable(self, msgid, scope='package', line=None, ignore_unknown=False):
@@ -291,8 +297,8 @@ class MessagesHandlerMixIn(object):
         catid = category_id(msgid)
         # msgid is a category?
         if catid is not None:
-            for msgid in self.msgs_store._msgs_by_category.get(catid):
-                self.enable(msgid, scope, line)
+            for message_id in self.msgs_store._msgs_by_category.get(catid):
+                self.enable(message_id, scope, line)
             return
         # msgid is a checker name?
         if msgid.lower() in self._checkers:
@@ -308,7 +314,7 @@ class MessagesHandlerMixIn(object):
         try:
             # msgid is a symbolic or numeric msgid.
             msg = self.msgs_store.check_message_id(msgid)
-        except UnknownMessage:
+        except UnknownMessageError:
             if ignore_unknown:
                 return
             raise
@@ -320,7 +326,7 @@ class MessagesHandlerMixIn(object):
             msgs = self._msgs_state
             msgs[msg.msgid] = True
             # sync configuration object
-            self.config.enable = [mid for mid, val in six.iteritems(msgs) if val]
+            self.config.enable = [mid for mid, val in sorted(six.iteritems(msgs)) if val]
 
     def get_message_state_scope(self, msgid, line=None, confidence=UNDEFINED):
         """Returns the scope at which a message was enabled/disabled."""
@@ -343,7 +349,7 @@ class MessagesHandlerMixIn(object):
                 return False
         try:
             msgid = self.msgs_store.check_message_id(msg_descr).msgid
-        except UnknownMessage:
+        except UnknownMessageError:
             # The linter checks for messages that are not registered
             # due to version mismatch, just treat them as message IDs
             # for now.
@@ -372,11 +378,18 @@ class MessagesHandlerMixIn(object):
         # does not apply to them.
         if msgid[0] not in _SCOPE_EXEMPT:
             if msg_info.scope == WarningScope.LINE:
-                assert node is None and line is not None, (
-                    'Message %s must only provide line, got line=%s, node=%s' % (msgid, line, node))
+                if line is None:
+                    raise InvalidMessageError(
+                        'Message %s must provide line, got None' % msgid)
+                if node is not None:
+                    raise InvalidMessageError(
+                        'Message %s must only provide line, '
+                        'got line=%s, node=%s' % (msgid, line, node))
             elif msg_info.scope == WarningScope.NODE:
                 # Node-based warnings may provide an override line.
-                assert node is not None, 'Message %s must provide Node, got None'
+                if node is None:
+                    raise InvalidMessageError(
+                        'Message %s must provide Node, got None' % msgid)
 
         if line is None and node is not None:
             line = node.fromlineno
@@ -416,13 +429,16 @@ class MessagesHandlerMixIn(object):
             Message(msgid, symbol,
                     (abspath, path, module, obj, line or 1, col_offset or 0), msg, confidence))
 
-    def print_full_documentation(self):
+    def print_full_documentation(self, stream=None):
         """output a full documentation in ReST format"""
-        print("Pylint global options and switches")
-        print("----------------------------------")
-        print("")
-        print("Pylint provides global options and switches.")
-        print("")
+        if not stream:
+            stream = sys.stdout
+
+        print("Pylint global options and switches", file=stream)
+        print("----------------------------------", file=stream)
+        print("", file=stream)
+        print("Pylint provides global options and switches.", file=stream)
+        print("", file=stream)
 
         by_checker = {}
         for checker in self.get_checkers():
@@ -433,63 +449,94 @@ class MessagesHandlerMixIn(object):
                             title = 'General options'
                         else:
                             title = '%s options' % section.capitalize()
-                        print(title)
-                        print('~' * len(title))
-                        _rest_format_section(sys.stdout, None, options)
-                        print("")
+                        print(title, file=stream)
+                        print('~' * len(title), file=stream)
+                        _rest_format_section(stream, None, options)
+                        print("", file=stream)
             else:
+                name = checker.name
                 try:
-                    by_checker[checker.name][0] += checker.options_and_values()
-                    by_checker[checker.name][1].update(checker.msgs)
-                    by_checker[checker.name][2] += checker.reports
+                    by_checker[name]['options'] += checker.options_and_values()
+                    by_checker[name]['msgs'].update(checker.msgs)
+                    by_checker[name]['reports'] += checker.reports
                 except KeyError:
-                    by_checker[checker.name] = [list(checker.options_and_values()),
-                                                dict(checker.msgs),
-                                                list(checker.reports)]
+                    by_checker[name] = {
+                        'options': list(checker.options_and_values()),
+                        'msgs':    dict(checker.msgs),
+                        'reports': list(checker.reports),
+                    }
 
-        print("Pylint checkers' options and switches")
-        print("-------------------------------------")
-        print("")
-        print("Pylint checkers can provide three set of features:")
-        print("")
-        print("* options that control their execution,")
-        print("* messages that they can raise,")
-        print("* reports that they can generate.")
-        print("")
-        print("Below is a list of all checkers and their features.")
-        print("")
+        print("Pylint checkers' options and switches", file=stream)
+        print("-------------------------------------", file=stream)
+        print("", file=stream)
+        print("Pylint checkers can provide three set of features:", file=stream)
+        print("", file=stream)
+        print("* options that control their execution,", file=stream)
+        print("* messages that they can raise,", file=stream)
+        print("* reports that they can generate.", file=stream)
+        print("", file=stream)
+        print("Below is a list of all checkers and their features.", file=stream)
+        print("", file=stream)
 
-        for checker, (options, msgs, reports) in six.iteritems(by_checker):
-            title = '%s checker' % (checker.replace("_", " ").title())
-            print(title)
-            print('~' * len(title))
-            print("")
-            print("Verbatim name of the checker is ``%s``." % checker)
-            print("")
-            if options:
-                title = 'Options'
-                print(title)
-                print('^' * len(title))
-                _rest_format_section(sys.stdout, None, options)
-                print("")
-            if msgs:
-                title = 'Messages'
-                print(title)
-                print('~' * len(title))
-                for msgid, msg in sorted(six.iteritems(msgs),
-                                         key=lambda kv: (_MSG_ORDER.index(kv[0][0]), kv[1])):
-                    msg = build_message_def(checker, msgid, msg)
-                    print(msg.format_help(checkerref=False))
-                print("")
-            if reports:
-                title = 'Reports'
-                print(title)
-                print('~' * len(title))
-                for report in reports:
-                    print(':%s: %s' % report[:2])
-                print("")
-            print("")
+        for checker, info in six.iteritems(by_checker):
+            self._print_checker_doc(checker, info, stream=stream)
 
+    @staticmethod
+    def _print_checker_doc(checker_name, info, stream=None):
+        """Helper method for print_full_documentation.
+
+        Also used by doc/exts/pylint_extensions.py.
+        """
+        if not stream:
+            stream = sys.stdout
+
+        doc = info.get('doc')
+        module = info.get('module')
+        msgs = info.get('msgs')
+        options = info.get('options')
+        reports = info.get('reports')
+
+        title = '%s checker' % (checker_name.replace("_", " ").title())
+
+        if module:
+            # Provide anchor to link against
+            print(".. _%s:\n" % module, file=stream)
+        print(title, file=stream)
+        print('~' * len(title), file=stream)
+        print("", file=stream)
+        if module:
+            print("This checker is provided by ``%s``." % module, file=stream)
+        print("Verbatim name of the checker is ``%s``." % checker_name, file=stream)
+        print("", file=stream)
+        if doc:
+            title = 'Documentation'
+            print(title, file=stream)
+            print('^' * len(title), file=stream)
+            print(cleandoc(doc), file=stream)
+            print("", file=stream)
+        if options:
+            title = 'Options'
+            print(title, file=stream)
+            print('^' * len(title), file=stream)
+            _rest_format_section(stream, None, options)
+            print("", file=stream)
+        if msgs:
+            title = 'Messages'
+            print(title, file=stream)
+            print('^' * len(title), file=stream)
+            for msgid, msg in sorted(six.iteritems(msgs),
+                                     key=lambda kv: (_MSG_ORDER.index(kv[0][0]), kv[1])):
+                msg = build_message_def(checker_name, msgid, msg)
+                print(msg.format_help(checkerref=False), file=stream)
+            print("", file=stream)
+        if reports:
+            title = 'Reports'
+            print(title, file=stream)
+            print('^' * len(title), file=stream)
+            for report in reports:
+                print(':%s: %s' % report[:2], file=stream)
+            print("", file=stream)
+        print("", file=stream)
 
 class FileState(object):
     """Hold internal state specific to the currently analyzed file"""
@@ -632,8 +679,8 @@ class MessagesStore(object):
         """
         msg = self.check_message_id(new_symbol)
         msg.old_names.append((old_id, old_symbol))
-        self._alternative_names[old_id] = msg
-        self._alternative_names[old_symbol] = msg
+        self._register_alternative_name(msg, old_id)
+        self._register_alternative_name(msg, old_symbol)
 
     def register_messages(self, checker):
         """register a dictionary of messages
@@ -645,29 +692,42 @@ class MessagesStore(object):
         are the checker id and the two last the message id in this checker
         """
         chkid = None
-        for msgid, msg_tuple in six.iteritems(checker.msgs):
+        for msgid, msg_tuple in sorted(six.iteritems(checker.msgs)):
             msg = build_message_def(checker, msgid, msg_tuple)
-            assert msg.symbol not in self._messages, \
-                    'Message symbol %r is already defined' % msg.symbol
             # avoid duplicate / malformed ids
-            assert msg.msgid not in self._alternative_names, \
-                   'Message id %r is already defined' % msgid
-            assert chkid is None or chkid == msg.msgid[1:3], \
-                   'Inconsistent checker part in message id %r' % msgid
+            if msg.symbol in self._messages or msg.symbol in self._alternative_names:
+                raise InvalidMessageError(
+                    'Message symbol %r is already defined' % msg.symbol)
+            if chkid is not None and chkid != msg.msgid[1:3]:
+                raise InvalidMessageError(
+                    "Inconsistent checker part in message id %r (expected 'x%sxx')"
+                    % (msgid, chkid))
             chkid = msg.msgid[1:3]
             self._messages[msg.symbol] = msg
-            self._alternative_names[msg.msgid] = msg
+            self._register_alternative_name(msg, msg.msgid)
             for old_id, old_symbol in msg.old_names:
-                self._alternative_names[old_id] = msg
-                self._alternative_names[old_symbol] = msg
+                self._register_alternative_name(msg, old_id)
+                self._register_alternative_name(msg, old_symbol)
             self._msgs_by_category[msg.msgid[0]].append(msg.msgid)
+
+    def _register_alternative_name(self, msg, name):
+        """helper for register_message()"""
+        if name in self._messages and self._messages[name] != msg:
+            raise InvalidMessageError(
+                'Message symbol %r is already defined' % name)
+        if name in self._alternative_names and self._alternative_names[name] != msg:
+            raise InvalidMessageError(
+                'Message %s %r is already defined' % (
+                    'id' if len(name) == 5 and name[0] in MSG_TYPES else 'alternate name',
+                    name))
+        self._alternative_names[name] = msg
 
     def check_message_id(self, msgid):
         """returns the Message object for this message.
 
         msgid may be either a numeric or symbolic id.
 
-        Raises UnknownMessage if the message id is not defined.
+        Raises UnknownMessageError if the message id is not defined.
         """
         if msgid[1:].isdigit():
             msgid = msgid.upper()
@@ -676,7 +736,7 @@ class MessagesStore(object):
                 return source[msgid]
             except KeyError:
                 pass
-        raise UnknownMessage('No such message id %s' % msgid)
+        raise UnknownMessageError('No such message id %s' % msgid)
 
     def get_msg_display_string(self, msgid):
         """Generates a user-consumable representation of a message.
@@ -691,7 +751,7 @@ class MessagesStore(object):
             try:
                 print(self.check_message_id(msgid).format_help(checkerref=True))
                 print("")
-            except UnknownMessage as ex:
+            except UnknownMessageError as ex:
                 print(ex)
                 print("")
                 continue
@@ -758,7 +818,7 @@ class ReportsHandlerMixIn(object):
                 report_sect = Section(r_title)
                 try:
                     r_cb(report_sect, stats, old_stats)
-                except EmptyReport:
+                except EmptyReportError:
                     continue
                 report_sect.report_id = reportid
                 sect.append(report_sect)
@@ -837,8 +897,8 @@ def expand_modules(files_or_modules, black_list, black_list_re):
             is_namespace = False
             is_directory = isdir(something)
         else:
-            is_namespace = spec.type == modutils.ModuleType.PY_NAMESPACE
-            is_directory = spec.type == modutils.ModuleType.PKG_DIRECTORY
+            is_namespace = modutils.is_namespace(spec)
+            is_directory = modutils.is_directory(spec)
 
         if not is_namespace:
             result.append({'path': filepath, 'name': modname, 'isarg': True,
@@ -987,11 +1047,10 @@ def get_global_option(checker, option, default=None):
     return default
 
 
-def deprecated_option(shortname=None, opt_type=None, help_msg=None):
+def deprecated_option(shortname=None, opt_type=None, help_msg=None, deprecation_msg=None):
     def _warn_deprecated(option, optname, *args): # pylint: disable=unused-argument
-        msg = ("Warning: option %s is obsolete and "
-               "it is slated for removal in Pylint 1.6.\n")
-        sys.stderr.write(msg % (optname,))
+        if deprecation_msg:
+            sys.stderr.write(deprecation_msg % (optname,))
 
     option = {
         'help': help_msg,
@@ -1085,7 +1144,7 @@ def _comment(string):
 def _format_option_value(optdict, value):
     """return the user input's value from a 'compiled' value"""
     if isinstance(value, (list, tuple)):
-        value = ','.join(value)
+        value = ','.join(_format_option_value(optdict, item) for item in value)
     elif isinstance(value, dict):
         value = ','.join('%s:%s' % (k, v) for k, v in value.items())
     elif hasattr(value, 'match'): # optdict.get('type') == 'regexp'

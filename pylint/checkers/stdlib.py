@@ -1,3 +1,9 @@
+# Copyright (c) 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014 Vlad Temian <vladtemian@gmail.com>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Cezar <celnazli@bitdefender.com>
+# Copyright (c) 2015 Chris Rebert <code@rebertia.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -105,14 +111,14 @@ class StdlibChecker(BaseChecker):
             'tkinter.Menu.tk_bindForTraversal',
         ],
         2: {
-            (2, 6): [
+            (2, 6, 0): [
                 'commands.getstatus',
                 'os.popen2',
                 'os.popen3',
                 'os.popen4',
                 'macostools.touched',
             ],
-            (2, 7): [
+            (2, 7, 0): [
                 'unittest.case.TestCase.assertEquals',
                 'unittest.case.TestCase.assertNotEquals',
                 'unittest.case.TestCase.assertAlmostEquals',
@@ -125,15 +131,15 @@ class StdlibChecker(BaseChecker):
             ],
         },
         3: {
-            (3, 0): [
+            (3, 0, 0): [
                 'inspect.getargspec',
                 'unittest.case.TestCase._deprecate.deprecated_func',
             ],
-            (3, 1): [
+            (3, 1, 0): [
                 'base64.encodestring', 'base64.decodestring',
                 'ntpath.splitunc',
             ],
-            (3, 2): [
+            (3, 2, 0): [
                 'cgi.escape',
                 'configparser.RawConfigParser.readfp',
                 'xml.etree.ElementTree.Element.getchildren',
@@ -141,21 +147,23 @@ class StdlibChecker(BaseChecker):
                 'xml.etree.ElementTree.XMLParser.getiterator',
                 'xml.etree.ElementTree.XMLParser.doctype',
             ],
-            (3, 3): [
-                'inspect.getmoduleinfo', 'inspect.getmodulename',
+            (3, 3, 0): [
+                'inspect.getmoduleinfo',
                 'logging.warn', 'logging.Logger.warn',
                 'logging.LoggerAdapter.warn',
                 'nntplib._NNTPBase.xpath',
                 'platform.popen',
             ],
-            (3, 4): [
-                'asyncio.tasks.async',
+            (3, 4, 0): [
                 'importlib.find_loader',
                 'plistlib.readPlist', 'plistlib.writePlist',
                 'plistlib.readPlistFromBytes',
                 'plistlib.writePlistToBytes',
             ],
-            (3, 5): [
+            (3, 4, 4): [
+                'asyncio.tasks.async',
+            ],
+            (3, 5, 0): [
                 'fractions.gcd',
                 'inspect.getfullargspec', 'inspect.getargvalues',
                 'inspect.formatargspec', 'inspect.formatargvalues',

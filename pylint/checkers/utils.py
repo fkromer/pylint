@@ -1,10 +1,23 @@
+# Copyright (c) 2006-2007, 2009-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2012-2014 Google, Inc.
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Radu Ciorba <radu@devrandom.ro>
+# Copyright (c) 2015 Dmitry Pribysh <dmand@yandex.ru>
+# Copyright (c) 2016 Ashley Whetter <ashley@awhetter.co.uk>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
 # pylint: disable=W0611
 """some functions that may be useful for various checkers
 """
+import collections
 import functools
+try:
+    from functools import singledispatch as singledispatch
+except ImportError:
+    # pylint: disable=import-error
+    from singledispatch import singledispatch as singledispatch
 import itertools
 import re
 import sys
@@ -17,6 +30,7 @@ from six.moves import map, builtins # pylint: disable=redefined-builtin
 import astroid
 from astroid import bases as _bases
 from astroid import scoped_nodes
+
 
 BUILTINS_NAME = builtins.__name__
 COMP_NODE_TYPES = (astroid.ListComp, astroid.SetComp,
@@ -244,8 +258,8 @@ def is_func_decorator(node):
         if isinstance(parent, astroid.Decorators):
             return True
         if (parent.is_statement or
-                isinstance(parent, astroid.Lambda) or
-                isinstance(parent, (scoped_nodes.ComprehensionScope,
+                isinstance(parent, (astroid.Lambda,
+                                    scoped_nodes.ComprehensionScope,
                                     scoped_nodes.ListComp))):
             break
         parent = parent.parent
@@ -435,7 +449,7 @@ def inherit_from_std_ex(node):
             and node.root().name == EXCEPTIONS_MODULE:
         return True
     return any(inherit_from_std_ex(parent)
-               for parent in node.ancestors(recurs=False))
+               for parent in node.ancestors(recurs=True))
 
 def error_of_type(handler, error_type):
     """
@@ -760,3 +774,31 @@ def has_known_bases(klass, context=None):
             return False
     klass._all_bases_known = True
     return True
+
+
+def is_none(node):
+    return (node is None or
+            (isinstance(node, astroid.Const) and node.value is None) or
+            (isinstance(node, astroid.Name)  and node.name == 'None')
+           )
+
+
+def node_type(node):
+    """Return the inferred type for `node`
+
+    If there is more than one possible type, or if inferred type is YES or None,
+    return None
+    """
+    # check there is only one possible type for the assign node. Else we
+    # don't handle it for now
+    types = set()
+    try:
+        for var_type in node.infer():
+            if var_type == astroid.YES or is_none(var_type):
+                continue
+            types.add(var_type)
+            if len(types) > 1:
+                return
+    except astroid.InferenceError:
+        return
+    return types.pop() if types else None

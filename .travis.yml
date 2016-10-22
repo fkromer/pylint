@@ -27,6 +27,10 @@ install:
   - tox --version
   - coverage --version
 script:
+    # Test install with current version of setuptools
+  - pip install .
+    # Run the tests with newest version of setuptools
+  - pip install -U setuptools
   - tox -e coverage-erase,$TOXENV
 after_success:
   - tox -e coveralls

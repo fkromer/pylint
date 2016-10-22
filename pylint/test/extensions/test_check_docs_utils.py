@@ -1,3 +1,6 @@
+# Copyright (c) 2016 Ashley Whetter <ashley@awhetter.co.uk>
+# Copyright (c) 2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -122,6 +125,19 @@ class PossibleExcTypesText(unittest.TestCase):
         ''')
         found = utils.possible_exc_types(raise_node)
         expected = set(["RuntimeError", "ValueError"])
+        self.assertEqual(found, expected)
+
+    def test_ignores_uninferable_type(self):
+        raise_node = astroid.extract_node('''
+        import not_a_module
+        def my_func():
+            try:
+                fake_func()
+            except not_a_module.Error:
+                raise #@
+        ''')
+        found = utils.possible_exc_types(raise_node)
+        expected = set()
         self.assertEqual(found, expected)
 
 if __name__ == '__main__':

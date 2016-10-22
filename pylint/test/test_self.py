@@ -1,3 +1,7 @@
+# Copyright (c) 2006-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -17,7 +21,6 @@ from pylint.lint import Run
 from pylint import __pkginfo__
 from pylint.reporters import BaseReporter
 from pylint.reporters.text import *
-from pylint.reporters.html import HTMLReporter
 from pylint.reporters.json import JSONReporter
 
 HERE = abspath(dirname(__file__))
@@ -106,7 +109,6 @@ class RunTC(unittest.TestCase):
         """Make pylint check itself."""
         reporters = [
             TextReporter(six.StringIO()),
-            HTMLReporter(six.StringIO()),
             ColorizedTextReporter(six.StringIO()),
             JSONReporter(six.StringIO())
         ]
@@ -122,6 +124,15 @@ class RunTC(unittest.TestCase):
     def test_generate_config_option(self):
         self._runtest(['--generate-rcfile'], code=0)
 
+    def test_generate_config_option_order(self):
+        out1 = six.StringIO()
+        out2 = six.StringIO()
+        self._runtest(['--generate-rcfile'], code=0, out=out1)
+        self._runtest(['--generate-rcfile'], code=0, out=out2)
+        output1 = out1.getvalue()
+        output2 = out2.getvalue()
+        self.assertEqual(output1, output2)
+
     def test_generate_config_disable_symbolic_names(self):
         # Test that --generate-rcfile puts symbolic names in the --disable
         # option.
@@ -132,7 +143,7 @@ class RunTC(unittest.TestCase):
         output = out.getvalue()
         # Get rid of the pesky messages that pylint emits if the
         # configuration file is not found.
-        master = re.search("\[MASTER", output)        
+        master = re.search("\[MASTER", output)
         out = six.StringIO(output[master.start():])
         parser = six.moves.configparser.RawConfigParser()
         parser.readfp(out)
@@ -144,31 +155,6 @@ class RunTC(unittest.TestCase):
         self._run_pylint(["--generate-rcfile"], out=out)
         output = out.getvalue()
         self.assertNotIn("profile", output)
-
-    def _test_deprecated_options(self, option, expected):
-        out = six.StringIO()
-        self._run_pylint([option, "--rcfile=", "pylint.config"], out=out)
-        output = out.getvalue()
-        if __pkginfo__.numversion >= (1, 6, 0):
-            self.assertIn("no such option", output)
-        else:
-            self.assertIn(expected, output)
-
-    def test_deprecated_options_zope(self):
-        expected = "no such option"
-        self._test_deprecated_options("--zope=y", expected)
-
-    def test_deprecated_options_symbols(self):
-        expected = "no such option"
-        self._test_deprecated_options("--symbols=y", expected)
-
-    def test_deprecated_options_include_ids(self):
-        expected = "no such option"
-        self._test_deprecated_options("--include-ids=y", expected)
-
-    def test_deprecated_options_profile(self):
-        expected = "no such option"
-        self._test_deprecated_options("--profile=y", expected)
 
     def test_help_message_option(self):
         self._runtest(['--help-msg', 'W0101'], code=0)
@@ -254,11 +240,6 @@ class RunTC(unittest.TestCase):
         """)
         self._test_output([module, "--disable=all", "--enable=all", "-rn"],
                           expected_output=expected)
-
-    def test_html_crash_report(self):
-        out = six.StringIO()
-        module = join(HERE, 'regrtest_data', 'html_crash_420.py')
-        self._runtest([module], code=16, reporter=HTMLReporter(out))
 
     def test_wrong_import_position_when_others_disabled(self):
         expected_output = textwrap.dedent('''
@@ -363,6 +344,42 @@ class RunTC(unittest.TestCase):
         expected = 'Your code has been rated at 10.00/10'
         self._test_output([path, "--rcfile=%s" % config_path, "-rn"],
                           expected_output=expected)
+
+    def test_pylintrc_plugin_duplicate_options(self):
+        dummy_plugin_path = join(HERE, 'regrtest_data', 'dummy_plugin')
+        # Enable --load-plugins=dummy_plugin
+        sys.path.append(dummy_plugin_path)
+        config_path = join(HERE, 'regrtest_data', 'dummy_plugin.rc')
+        expected = (
+            ":dummy-message-01 (I9061): *Dummy short desc 01*\n"
+            "  Dummy long desc This message belongs to the dummy_plugin checker.\n\n"
+            ":dummy-message-02 (I9060): *Dummy short desc 02*\n"
+            "  Dummy long desc This message belongs to the dummy_plugin checker.")
+        self._test_output(["--rcfile=%s" % config_path,
+                           "--help-msg=dummy-message-01,dummy-message-02"],
+                          expected_output=expected)
+        expected = (
+            "[DUMMY_PLUGIN]\n\n# Dummy option 1\ndummy_option_1=dummy value 1\n\n"
+            "# Dummy option 2\ndummy_option_2=dummy value 2")
+        self._test_output(["--rcfile=%s" % config_path, "--generate-rcfile"],
+                          expected_output=expected)
+        sys.path.remove(dummy_plugin_path)
+
+    def test_pylintrc_comments_in_values(self):
+        path = join(HERE, 'regrtest_data', 'test_pylintrc_comments.py')
+        config_path = join(HERE, 'regrtest_data', 'comments_pylintrc')
+        expected = textwrap.dedent('''
+        ************* Module test_pylintrc_comments
+        W:  2, 0: Bad indentation. Found 1 spaces, expected 4 (bad-indentation)
+        C:  1, 0: Missing module docstring (missing-docstring)
+        C:  1, 0: Missing function docstring (missing-docstring)
+        ''')
+        self._test_output([path, "--rcfile=%s" % config_path, "-rn"],
+                          expected_output=expected)
+
+    def test_no_crash_with_formatting_regex_defaults(self):
+        self._runtest(["--ignore-patterns=a"], reporter=TextReporter(six.StringIO()),
+                      code=32)
 
 
 if __name__ == '__main__':

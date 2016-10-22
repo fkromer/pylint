@@ -1,8 +1,13 @@
+# Copyright (c) 2014, 2016 Google, Inc.
+# Copyright (c) 2015 Dmitry Pribysh <dmand@yandex.ru>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
 """Unittest for the type checker."""
 import unittest
+import sys
 
 import astroid
 
@@ -26,7 +31,7 @@ class TypeCheckerTest(CheckerTestCase):
                 Message(
                     'no-member',
                     node=node,
-                    args=('Module', 'optparse', 'THIS_does_not_EXIST'))):
+                    args=('Module', 'optparse', 'THIS_does_not_EXIST', ''))):
             self.checker.visit_attribute(node)
 
     @set_config(ignored_modules=('argparse',))
@@ -49,7 +54,7 @@ class TypeCheckerTest(CheckerTestCase):
         xml.etree.Lala
         ''')
         message = Message('no-member', node=node,
-                          args=('Module', 'xml.etree', 'Lala'))
+                          args=('Module', 'xml.etree', 'Lala', ''))
         with self.assertAddsMessages(message):
             self.checker.visit_attribute(node)
 
@@ -69,7 +74,7 @@ class TypeCheckerTest(CheckerTestCase):
         xml.etree.ElementTree.Test
         ''')
         message = Message('no-member', node=node,
-                          args=('Module', 'xml.etree.ElementTree', 'Test'))
+                          args=('Module', 'xml.etree.ElementTree', 'Test', ''))
         with self.assertAddsMessages(message):
             self.checker.visit_attribute(node)
 
@@ -109,6 +114,52 @@ class TypeCheckerTest(CheckerTestCase):
         ''')
         with self.assertNoMessages():
             self.checker.visit_with(node)
+
+    def test_invalid_metaclass(self):
+        module = astroid.parse('''
+        import six
+
+        class InvalidAsMetaclass(object):
+            pass
+
+        @six.add_metaclass(int)
+        class FirstInvalid(object):
+            pass
+
+        @six.add_metaclass(InvalidAsMetaclass)
+        class SecondInvalid(object):
+            pass
+
+        @six.add_metaclass(2)
+        class ThirdInvalid(object):
+            pass
+        ''')
+        for class_obj, metaclass_name in (('ThirdInvalid', '2'),
+                                          ('SecondInvalid', 'InvalidAsMetaclass'),
+                                          ('FirstInvalid', 'int')):
+            classdef = module[class_obj]
+            message = Message('invalid-metaclass', node=classdef, args=(metaclass_name, ))
+            with self.assertAddsMessages(message):
+                self.checker.visit_classdef(classdef)
+
+    @unittest.skipUnless(sys.version_info[0] >= 3, 'Needs Python 3.')
+    def test_invalid_metaclass_function_metaclasses(self):
+        module = astroid.parse('''
+        def invalid_metaclass_1(name, bases, attrs):
+            return int
+        def invalid_metaclass_2(name, bases, attrs):
+            return 1
+        class Invalid(metaclass=invalid_metaclass_1):
+            pass
+        class InvalidSecond(metaclass=invalid_metaclass_2):
+            pass
+        ''')
+        for class_obj, metaclass_name in (('Invalid', 'int'), ('InvalidSecond', '1')):
+            classdef = module[class_obj]
+            message = Message('invalid-metaclass', node=classdef, args=(metaclass_name, ))
+            with self.assertAddsMessages(message):
+                self.checker.visit_classdef(classdef)
+
 
 
 if __name__ == '__main__':

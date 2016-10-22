@@ -1,3 +1,8 @@
+# Copyright (c) 2014-2015 Bruno Daniel <bruno.daniel@blue-yonder.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2016 Ashley Whetter <ashley@awhetter.co.uk>
+# Copyright (c) 2016 Glenn Matthews <glenn@e-dad.net>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -123,7 +128,7 @@ class ParamDocCheckerTest(CheckerTestCase):
     def test_don_t_tolerate_no_param_documentation_at_all(self):
         """Example of a function with no parameter documentation at all
 
-        No error message is emitted.
+        Missing documentation error message is emitted.
         """
         node = astroid.extract_node("""
         def function_foo(x, y):
@@ -142,6 +147,22 @@ class ParamDocCheckerTest(CheckerTestCase):
                 node=node,
                 args=('x, y',))
         ):
+            self.checker.visit_functiondef(node)
+
+    @set_config(accept_no_param_doc=False)
+    def test_see_tolerate_no_param_documentation_at_all(self):
+        """Example for the usage of "For the parameters, see"
+        to suppress missing-param warnings.
+        """
+        node = astroid.extract_node("""
+        def function_foo(x, y):
+            '''docstring ...
+
+            For the parameters, see :func:`blah`
+            '''
+            pass
+        """)
+        with self.assertNoMessages():
             self.checker.visit_functiondef(node)
 
     def _visit_methods_of_class(self, node):
@@ -254,12 +275,12 @@ class ParamDocCheckerTest(CheckerTestCase):
             :param xarg: bla xarg
             :type xarg: int
 
-            :param yarg: bla yarg
+            :parameter yarg: bla yarg
             :type yarg: my.qualified.type
 
-            :param int zarg: bla zarg
+            :arg int zarg: bla zarg
 
-            :param my.qualified.type warg: bla warg
+            :keyword my.qualified.type warg: bla warg
 
             :return: sum
             :rtype: float
@@ -737,6 +758,43 @@ class ParamDocCheckerTest(CheckerTestCase):
                 args=('x, y',))
         ):
             self._visit_methods_of_class(node)
+
+    @set_config(accept_no_param_doc=False)
+    def test_see_sentence_for_constr_params_in_class(self):
+        """Example usage of "For the parameters, see" in class docstring"""
+        node = astroid.extract_node("""
+        class ClassFoo(object):
+            '''docstring foo
+
+            For the parameters, see :func:`bla`
+            '''
+
+            def __init__(self, x, y):
+                '''init'''
+                pass
+
+        """)
+        with self.assertNoMessages():
+            self._visit_methods_of_class(node)
+
+    @set_config(accept_no_param_doc=False)
+    def test_see_sentence_for_constr_params_in_init(self):
+        """Example usage of "For the parameters, see" in init docstring"""
+        node = astroid.extract_node("""
+        class ClassFoo(object):
+            '''foo'''
+
+            def __init__(self, x, y):
+                '''docstring foo constructor
+
+                For the parameters, see :func:`bla`
+                '''
+                pass
+
+        """)
+        with self.assertNoMessages():
+            self._visit_methods_of_class(node)
+
 
     def test_constr_params_in_class_and_init_sphinx(self):
         """Example of a class with missing constructor parameter documentation

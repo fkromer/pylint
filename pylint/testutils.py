@@ -1,3 +1,7 @@
+# Copyright (c) 2012-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2014 Google, Inc.
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+
 # Licensed under the GPL: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 # For details: https://github.com/PyCQA/pylint/blob/master/COPYING
 
@@ -115,6 +119,11 @@ class TestReporter(BaseReporter):
         result = self.out.getvalue()
         self.reset()
         return result
+
+    # pylint: disable=unused-argument
+    def on_set_current_module(self, module, filepath):
+        pass
+    # pylint: enable=unused-argument
 
     def display_reports(self, layout):
         """ignore layouts"""
