@@ -14,6 +14,8 @@ import sys
 import codecs
 from os.path import join, dirname, abspath
 from difflib import unified_diff
+from contextlib import contextmanager
+from io import StringIO # FIXME: python 2 -> from StringIO import StringIO
 import unittest
 
 from astroid import MANAGER
@@ -27,7 +29,15 @@ from pylint.pyreverse.utils import get_visibility
 _DEFAULTS = {
     'all_ancestors': None, 'show_associated': None,
     'module_names': None,
-    'output_format': 'dot', 'diadefs_file': None, 'quiet': 0,
+    'output_format': 'dot', 'stdout': None, 'diadefs_file': None, 'quiet': 0,
+    'show_ancestors': None, 'classes': (), 'all_associated': None,
+    'mode': 'PUB_ONLY', 'show_builtin': False, 'only_classnames': False
+    }
+
+_STDOUT_DEFAULTS = {
+    'all_ancestors': None, 'show_associated': None,
+    'module_names': None,
+    'output_format': 'dot', 'stdout': True, 'diadefs_file': None, 'quiet': 0,
     'show_ancestors': None, 'classes': (), 'all_associated': None,
     'mode': 'PUB_ONLY', 'show_builtin': False, 'only_classnames': False
     }
@@ -38,6 +48,21 @@ class Config(object):
         for attr, value in _DEFAULTS.items():
             setattr(self, attr, value)
 
+class StdoutConfig(object):
+    """config object for stdout tests"""
+    def __init__(self):
+        for attr, value in _STDOUT_DEFAULTS.items():
+            setattr(self, attr, value)
+
+@contextmanager
+def captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 
 def _file_lines(path):
     # we don't care about the actual encoding, but python3 forces us to pick one
@@ -55,6 +80,7 @@ def get_project(module, name="No Name"):
                               project_name=name)
 
 CONFIG = Config()
+STDOUT_CONFIG = StdoutConfig()
 
 class DotWriterTC(unittest.TestCase):
 
@@ -97,6 +123,28 @@ class DotWriterTC(unittest.TestCase):
         self._test_same_file('classes_No_Name.dot')
 
 
+class DotWriterStdoutTC(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        project = get_project(os.path.join(os.path.dirname(__file__), 'data'))
+        linker = Linker(project)
+        handler = DiadefsHandler(CONFIG)
+        cls.dd = DefaultDiadefGenerator(linker, handler).visit(project)
+        for diagram in cls.dd:
+            diagram.extract_relationships()
+        cls.writer = DotWriter(STDOUT_CONFIG)
+        cls.package_diagram = cls.dd[0]
+        cls.class_diagram = cls.dd[1]
+
+    def test_package_diagram(cls):
+        """ TODO : separation of package and class diagram """
+        with captured_output() as (out, err):
+            cls.writer.write(cls.dd)
+            output = out.getvalue().strip()
+            expected_file = os.path.join(os.path.dirname(__file__), 'data', 'packages_No_Name.dot')
+            expected_output = _file_lines(expected_file)
+            cls.assertEqual(output, expected_output)
 
 class GetVisibilityTC(unittest.TestCase):
 
