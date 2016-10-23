@@ -26,11 +26,13 @@ def target_info_from_filename(filename):
 class DotBackend(object):
     """Dot File backend."""
     def __init__(self, graphname, rankdir=None, size=None, ratio=None,
-                 charset='utf-8', renderer='dot', additional_param=None):
+                 charset='utf-8', renderer='dot', stdout=None,
+                 additional_param=None):
         if additional_param is None:
             additional_param = {}
         self.graphname = graphname
         self.renderer = renderer
+        self.stdout = stdout
         self.lines = []
         self._source = None
         self.emit("digraph %s {" % normalize_node_id(graphname))
@@ -56,6 +58,15 @@ class DotBackend(object):
         return self._source
 
     source = property(get_source)
+
+    def stdout(self):
+        """Pipes the graph into the stdout stream.
+
+        :rtype: str
+        :return: the string representation of the generated graph
+        """
+        sys.stdout.write('fake graph output') # FIXME : source instead of fake
+        #sys.stdout.write(self.source)
 
     def generate(self, outputfile=None, dotfile=None, mapfile=None):
         """Generates a graph file.

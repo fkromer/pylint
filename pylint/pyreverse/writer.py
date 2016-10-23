@@ -25,7 +25,7 @@ class DiagramWriter(object):
         for diagram in diadefs:
             basename = diagram.title.strip().replace(' ', '_')
             file_name = '%s.%s' % (basename, self.config.output_format)
-            self.set_printer(file_name, basename)
+            self.set_printer(file_name, self.config.stdout, basename)
             if diagram.TYPE == 'class':
                 self.write_classes(diagram)
             else:
@@ -62,7 +62,7 @@ class DiagramWriter(object):
             self.printer.emit_edge(rel.from_object.fig_id, rel.to_object.fig_id,
                                    label=rel.name, **self.ass_edges)
 
-    def set_printer(self, file_name, basename):
+    def set_printer(self, file_name, stdout, basename):
         """set printer"""
         raise NotImplementedError
 
@@ -92,12 +92,13 @@ class DotWriter(DiagramWriter):
                  ]
         DiagramWriter.__init__(self, config, styles)
 
-    def set_printer(self, file_name, basename):
+    def set_printer(self, file_name, stdout, basename):
         """initialize DotWriter and add options for layout.
         """
         layout = dict(rankdir="BT")
-        self.printer = DotBackend(basename, additional_param=layout)
+        self.printer = DotBackend(basename, stdout, additional_param=layout)
         self.file_name = file_name
+        self.stdout = stdout
 
     def get_title(self, obj):
         """get project title"""
@@ -121,8 +122,11 @@ class DotWriter(DiagramWriter):
         return dict(label=label, shape='record')
 
     def close_graph(self):
-        """print the dot graph into <file_name>"""
-        self.printer.generate(self.file_name)
+        """print the dot graph into <file_name> or over stdout"""
+        if not self.config.stdout:
+            self.printer.generate(self.file_name)
+        else:
+            self.printer.stdout()
 
 
 class VCGWriter(DiagramWriter):
@@ -140,7 +144,7 @@ class VCGWriter(DiagramWriter):
                  ]
         DiagramWriter.__init__(self, config, styles)
 
-    def set_printer(self, file_name, basename):
+    def set_printer(self, file_name, stdout, basename):
         """initialize VCGWriter for a UML graph"""
         self.graph_file = open(file_name, 'w+')
         self.printer = VCGPrinter(self.graph_file)
