@@ -71,6 +71,7 @@ this disables -f values")),
     ("output", dict(short="o", dest="output_format", action="store",
                     default="dot", metavar="<format>",
                     help="create a *.<format> output file if format available.")),
+    # TODO : add stdout output option for pyreverse dot graphs
     ("ignore", {'type' : "csv", 'metavar' : "<file[,file...]>",
                 'dest' : "black_list", "default" : ('CVS',),
                 'help' : "Add files or directories to the blacklist. They "
